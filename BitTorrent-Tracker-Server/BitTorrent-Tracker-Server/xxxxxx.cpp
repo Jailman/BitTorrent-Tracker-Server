@@ -18,5 +18,5 @@ struct date
 };
 int main()
 {
-    cout<<"hellow";
+    cout<<"hellow£¬world";
 }
