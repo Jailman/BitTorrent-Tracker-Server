@@ -29,14 +29,15 @@ namespace Event
 				std::vector<Processer>().swap(this->Processors);
 			}
 		}
-		Event operator+=(const Processer& func)
+		void operator+=(const Processer& func)
 		{
 			this->Processors.push_back(func);
-			return (*this);
 		};
-        Event operator=(Event&& REvent) 
+		void operator=(Event&& REvent)
         {
-            if(this->Processors.c)
+            if(!this->Processors.empty())
+				std::vector<Processer>().swap(this->Processors);
+			this->Processors = std::move(REvent.Processors);
         }
 	};
 
