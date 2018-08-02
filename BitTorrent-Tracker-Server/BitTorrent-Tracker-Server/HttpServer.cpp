@@ -4,9 +4,9 @@ namespace Utils::HttpServer
 {
 	const std::exception SocketException("socket error");
 
-	auto ServerListenThreadFunc = [](SOCKET& slisten, std::vector<HttpSocketRequest>& RequestList, std::mutex& ThreadAccessLocker)
+	auto ServerListenThreadFunc = [](SOCKET& slisten, std::vector<SOCKET>& RequestList, std::mutex& ThreadAccessLocker)
 	{
-		using BufferArray = std::pair<std::array<byte, 1024>, int>;
+		constexpr int RecvTimeOut = 3000;
 		while (true)
 		{
 			try
@@ -14,69 +14,112 @@ namespace Utils::HttpServer
 				SOCKET sClient;
 				sockaddr_in remoteAddr;
 				int nAddrlen = sizeof(remoteAddr);
-				std::vector<BufferArray> RecBuffer;
-				BufferArray Tempbuffer;
+
 				//等待TCP连接
 				sClient = accept(slisten, (SOCKADDR *)&remoteAddr, &nAddrlen);
 
-				unsigned long ul = 1;
-				ioctlsocket(sClient, FIONBIO, (unsigned long *)&ul);
+				//unsigned long ul = 1;
+				//ioctlsocket(sClient, FIONBIO, (unsigned long *)&ul);
 
 				if (sClient == INVALID_SOCKET)
 				{
 					continue;
 				}
-				//屎，要重写
-				//接收数据 
-				//auto RecCount = -1;
-				//auto TotalLenth = 0;
-				//auto sleepCount = 0;
-				//while (RecCount != 0)
-				//{
-				//	RecCount = recv(sClient, (char*)Tempbuffer.first._Elems, 1024, 0);
-				//	if (RecCount == -1) 
-				//	{
-				//		if (sleepCount > 10)break;
-				//		Sleep(5);
-				//		continue;
-				//	}
-				//	TotalLenth += RecCount;
-				//	RecBuffer.push_back(Tempbuffer);
-				//	if (RecBuffer.size() > 1024)
-				//	{
-				//		closesocket(sClient);
-				//		std::vector<BufferArray>().swap(RecBuffer);
-				//		throw std::exception("Bad Request");
-				//	}
-				//	if (RecCount != 1024)
-				//		break;
-				//}
-				//auto buffer = new byte[TotalLenth];
-				//for (auto i = 0; i < TotalLenth; i++)
-				//{
-				//	if (i % 1024 > RecBuffer[i / 1024].second);
-				//	buffer[i] = RecBuffer[i / 1024].first[i % 1024];
-				//}
+				setsockopt(sClient, SOL_SOCKET, SO_RCVTIMEO, (char *)&RecvTimeOut, sizeof(int));
+				//提交给线程池处理
 				ThreadAccessLocker.lock();
-				auto req = HttpSocketRequest({ sClient,buffer,TotalLenth });
-				RequestList.push_back(req);
+				RequestList.push_back(sClient);
 				ThreadAccessLocker.unlock();
 				//std::thread(SocketConnectionHandler,sClient, buffer, TotalLenth); 这个会因为析构崩溃
 			}
 			catch (std::exception e) {}
 		}
 	};
-	auto ServerThreadPoolFunc = [](HttpServer& host,std::vector<HttpSocketRequest>& RequestList, std::mutex& ThreadAccessLocker)
+	auto ServerThreadPoolFunc = [](HttpServer& host,std::vector<SOCKET>& RequestList, std::mutex& ThreadAccessLocker)
 	{
+		constexpr int BufferLength = 256;
+		constexpr int RecvTimeOut = 3000;
+		using BufferArray = std::array<byte, BufferLength>;
 		while (true)
 		{
 			if (RequestList.size() < 8)Sleep(1);
 			if (RequestList.size() == 0)continue;
 			ThreadAccessLocker.lock();
 			if (RequestList.size() == 0) { ThreadAccessLocker.unlock();continue; }
-			auto req = RequestList[0];
+			auto sClient = RequestList[0];
 			RequestList.erase(RequestList.begin());
 			ThreadAccessLocker.unlock();
+
+			//接收数据 
+			std::vector<BufferArray> HttpRecBuffer;
+			BufferArray Tempbuffer = { 0 };
+			auto RecCount = 0;
+			auto TotalLenth = 0;
+			auto headLength = 0;
+			auto RetryCount = 0;
+			while (true)
+			{
+				auto SingleRecCount = recv(sClient, (char*)Tempbuffer._Elems + RecCount, BufferLength - RecCount, 0);
+				if (SingleRecCount == -1)
+				{
+					if (RetryCount == 10)
+					{
+						break;
+					}
+					RetryCount++;
+					Sleep(1);
+					continue;
+
+				};
+				RecCount += SingleRecCount;
+				if (strstr((char*)Tempbuffer._Elems, "\r\n\r\n"))
+				{
+					headLength = strstr((char*)Tempbuffer._Elems, "\r\n\r\n") - (char*)Tempbuffer._Elems + TotalLenth + 4;
+					HttpRecBuffer.push_back(Tempbuffer);
+					TotalLenth += RecCount;
+					break;
+				}
+				TotalLenth += RecCount;
+				if (TotalLenth%BufferLength == 0)
+				{
+					RecCount = 0;
+					HttpRecBuffer.push_back(Tempbuffer);
+					Tempbuffer = { 0 };
+				};
+			}
+			if (HttpRecBuffer.empty()) { closesocket(sClient); continue; };
+			byte* buffer = nullptr;
+			if (strstr((char*)HttpRecBuffer[0]._Elems, "POST") == (char*)HttpRecBuffer[0]._Elems)
+			{
+				//HTTP POST
+				char* HttpHeader = new char[headLength];
+				for (auto i = 0; i < headLength; i++)
+				{
+					HttpHeader[i] = HttpRecBuffer[i / BufferLength][i % BufferLength];
+				}
+				auto ContentLengthPos = strstr(HttpHeader, "Content-Length: ") + 16;
+				auto ContentLength = atoi(ContentLengthPos);
+				buffer = new byte[ContentLength];
+				for (auto i = 0; i < TotalLenth; i++)
+				{
+					buffer[i] = HttpRecBuffer[i / BufferLength][i % BufferLength];
+				}
+				while (TotalLenth != ContentLength)
+				{
+					RecCount = recv(sClient, (char*)buffer + TotalLenth, ContentLength - TotalLenth, 0);
+					TotalLenth += RecCount;
+				}
+			}
+			else
+			{
+				buffer = new byte[TotalLenth];
+				for (auto i = 0; i < TotalLenth; i++)
+				{
+					buffer[i] = HttpRecBuffer[i / BufferLength][i % BufferLength];
+				}
+			}
+			HttpSocketRequest req = { sClient,buffer,TotalLenth };
+
 			host.HttpSocketRequestRecevedEvent.Active(req);
 			delete[] req.buffer;
 			closesocket(req.sClient);

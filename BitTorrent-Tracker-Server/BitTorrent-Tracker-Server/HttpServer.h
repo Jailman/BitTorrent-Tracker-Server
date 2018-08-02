@@ -7,7 +7,7 @@
 #include "Event.h"
 namespace Utils::HttpServer
 {
-	constexpr int ThreadPoolSize = 16;
+	constexpr int ThreadPoolSize = 4;
 	class HttpServer
 	{
 	public:
@@ -32,7 +32,7 @@ namespace Utils::HttpServer
 	private:
 		std::thread loopTh;
 		std::array<std::thread, ThreadPoolSize> threadPool;
-		std::vector<HttpSocketRequest> RequestList;
+		std::vector<SOCKET> RequestList;
 		std::mutex ThreadAccessLocker;
 	public:
 		using EventHttpSocketRequestReceved = Event::Event<HttpSocketRequest>;
