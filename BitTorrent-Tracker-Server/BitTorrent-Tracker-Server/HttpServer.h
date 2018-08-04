@@ -44,6 +44,8 @@ namespace Utils::HttpServer
 #pragma region 构造,析构函数
 			HttpRequest() = delete;
 			HttpRequest(const char* HttpRequestBuffer,int64_t bufferLength);
+			HttpRequest(const HttpRequest& req);
+			HttpRequest(HttpRequest&& rreq);
 			~HttpRequest();
 #pragma endregion
 #undef DELETE
@@ -101,7 +103,7 @@ namespace Utils::HttpServer
 				NotSupport
 			};
 			CacheControl Cache_Control = CacheControl::None;
-			int64_t Cache_Control_Max_Age = 0;
+			int64_t Cache_Control_Max_Age = -1;
 			enum class ConnectionType 
 			{
 				//长连接
@@ -113,9 +115,11 @@ namespace Utils::HttpServer
 			};
 			ConnectionType Connection_Type = ConnectionType::None;
 			string Cookie = "";
-			int64_t Content_Length = 0;
+			int64_t Content_Length = -1;
 			string Content_MD5 = "";
 			string Content_Type = "";
+			//shit，don't want to touch.
+			/*
 			struct HttpDateTime 
 			{
 				int Year;
@@ -137,6 +141,7 @@ namespace Utils::HttpServer
 				week WeekDat;
 			};
 			HttpDateTime Date = { 0 };
+			*/
 			string Expect = "";
 			string From = "";
 			string Host = "";
@@ -145,7 +150,7 @@ namespace Utils::HttpServer
 			string If_None_Match = "";
 			string If_Range = "";
 			string If_Unmodified_Since = "";
-			int Max_Forwards = 0;
+			int64_t Max_Forwards = -1;
 			string Origin = "";
 			string Pragma = "";
 			string Proxy_Authorization = "";

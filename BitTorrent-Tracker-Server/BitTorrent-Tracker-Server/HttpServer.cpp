@@ -176,7 +176,8 @@ namespace Utils::HttpServer
 		auto reqHeaderEnd = strstr(HttpRequestBuffer, "\r\n\r\n") + HttpHeadEndLength;
 		if (reqHeaderEnd == 0)throw BadRequestException;
 		auto HeaderLength = reqHeaderEnd - HttpRequestBuffer;
-		std::string RequestHeade(HttpRequestBuffer, HeaderLength);
+		std::string RequestHeader(HttpRequestBuffer, HeaderLength);
+
 #pragma region 判断请求类型
 		switch (HttpRequestBuffer[0])
 		{
@@ -207,14 +208,15 @@ namespace Utils::HttpServer
 		}
 #pragma endregion
 #pragma region 判断请求链接
-		auto urlStart = RequestHeade.find(" ") + 1;
-		auto urlLength = RequestHeade.find(" ", urlStart) - urlStart;
-		this->RequsetUrl = std::string(RequestHeade.data() + urlStart, urlLength);
+		auto urlStart = RequestHeader.find(" ") + 1;
+		auto urlLength = RequestHeader.find(" ", urlStart) - urlStart;
+		this->RequsetUrl = std::string(RequestHeader.data() + urlStart, urlLength);
 #pragma endregion
-#pragma region Cache_Control处理
-		if (RequestHeade.find("Cache-Control") != -1)
+
+#pragma region Cache-Control处理
+		if (RequestHeader.find("Cache-Control") != -1)
 		{
-		auto Cache_Control_Method = HttpRequestHandler(RequestHeade, "Cache-Control:");
+		auto Cache_Control_Method = HttpRequestHandler(RequestHeader, "Cache-Control:");
 		this->Cache_Control = CacheControl::NotSupport;
 		if (Cache_Control_Method.find("max-age=") != -1) 
 		{
@@ -237,125 +239,137 @@ namespace Utils::HttpServer
 		
 		}
 #pragma endregion
-#pragma region Cache_Control处理
-		if (RequestHeade.find("Connection-Type") != -1)
+#pragma region Connection-Type处理
+		if (RequestHeader.find("Connection-Type") != -1)
 		{
-			auto Cache_Control_Method = HttpRequestHandler(RequestHeade, "Connection-Type");
+			auto Cache_Control_Method = HttpRequestHandler(RequestHeader, "Connection-Type");
 			this->Connection_Type = ConnectionType::None;
 			if (Cache_Control_Method == "keep-alive")
 				this->Connection_Type = ConnectionType::KeepAlive;
 			else if (Cache_Control_Method == "close")
 				this->Connection_Type = ConnectionType::Close;
-
-
 		}
 #pragma endregion
 
+#pragma region 数值类字段处理
+#pragma region Content-Length处理
+		if (RequestHeader.find("Content-Length") != -1)
+		{
+			this->Content_Length = atoi(RequestHeader.data() + RequestHeader.find("Content-Length") + strlen("Content-Length"));
+		}
+#pragma endregion
+#pragma region Max-Forwards处理
+		if (RequestHeader.find("Max-Forwards") != -1)
+		{
+			this->Max_Forwards = atoi(RequestHeader.data() + RequestHeader.find("Max-Forwards") + strlen("Max-Forwards"));
+		}
+#pragma endregion
+#pragma endregion	
 #pragma region 字符类字段处理
 
 #pragma region Accept字段处理
-		if (RequestHeade.find("Accept:") != -1)
-			this->Accept = HttpRequestHandler(RequestHeade, "Accept:");
+		if (RequestHeader.find("Accept:") != -1)
+			this->Accept = HttpRequestHandler(RequestHeader, "Accept:");
 #pragma endregion
 #pragma region Accept-Encoding字段处理
-		if (RequestHeade.find("Accept-Encoding:") != -1)
-			this->Accept_Encoding = HttpRequestHandler(RequestHeade, "Accept-Encoding:");
+		if (RequestHeader.find("Accept-Encoding:") != -1)
+			this->Accept_Encoding = HttpRequestHandler(RequestHeader, "Accept-Encoding:");
 #pragma endregion
 #pragma region Accept-Language字段处理
-		if (RequestHeade.find("Accept-Language:") != -1)
-			this->Accept_Language = HttpRequestHandler(RequestHeade, "Accept-Language:");
+		if (RequestHeader.find("Accept-Language:") != -1)
+			this->Accept_Language = HttpRequestHandler(RequestHeader, "Accept-Language:");
 #pragma endregion
 #pragma region Accept-Datetime字段处理
-		if (RequestHeade.find("Accept-Datetime") != -1)
-			this->Accept_Datetime = HttpRequestHandler(RequestHeade, "Accept-Datetime:");
+		if (RequestHeader.find("Accept-Datetime") != -1)
+			this->Accept_Datetime = HttpRequestHandler(RequestHeader, "Accept-Datetime:");
 #pragma endregion
 #pragma region Authorization字段处理
-		if (RequestHeade.find("Authorization") != -1)
-			this->Authorization = HttpRequestHandler(RequestHeade, "Authorization:");
+		if (RequestHeader.find("Authorization") != -1)
+			this->Authorization = HttpRequestHandler(RequestHeader, "Authorization:");
 #pragma endregion
 #pragma region Cookie字段处理
-		if (RequestHeade.find("Cookie") != -1)
-			this->Cookie = HttpRequestHandler(RequestHeade, "Cookie:");
+		if (RequestHeader.find("Cookie") != -1)
+			this->Cookie = HttpRequestHandler(RequestHeader, "Cookie:");
 #pragma endregion
 #pragma region Content_MD5字段处理
-		if (RequestHeade.find("Content-MD5") != -1)
-			this->Content_MD5 = HttpRequestHandler(RequestHeade, "Content-MD5:");
+		if (RequestHeader.find("Content-MD5") != -1)
+			this->Content_MD5 = HttpRequestHandler(RequestHeader, "Content-MD5:");
 #pragma endregion
 #pragma region Content_Type字段处理
-		if (RequestHeade.find("Content-Type") != -1)
-			this->Content_Type = HttpRequestHandler(RequestHeade, "Content-Type:");
+		if (RequestHeader.find("Content-Type") != -1)
+			this->Content_Type = HttpRequestHandler(RequestHeader, "Content-Type:");
 #pragma endregion
 #pragma region Expect字段处理
-		if (RequestHeade.find("Expect") != -1)
-			this->Expect = HttpRequestHandler(RequestHeade, "Expect:");
+		if (RequestHeader.find("Expect") != -1)
+			this->Expect = HttpRequestHandler(RequestHeader, "Expect:");
 #pragma endregion
 #pragma region From字段处理
-		if (RequestHeade.find("From") != -1)
-			this->From = HttpRequestHandler(RequestHeade, "From:");
+		if (RequestHeader.find("From") != -1)
+			this->From = HttpRequestHandler(RequestHeader, "From:");
 #pragma endregion
 #pragma region Host字段处理
-		if (RequestHeade.find("Host") != -1)
-			this->Host = HttpRequestHandler(RequestHeade, "Host:");
+		if (RequestHeader.find("Host") != -1)
+			this->Host = HttpRequestHandler(RequestHeader, "Host:");
 #pragma endregion
 #pragma region If_Match字段处理
-		if (RequestHeade.find("If-Match") != -1)
-			this->If_Match = HttpRequestHandler(RequestHeade, "If-Match:");
+		if (RequestHeader.find("If-Match") != -1)
+			this->If_Match = HttpRequestHandler(RequestHeader, "If-Match:");
 #pragma endregion
 #pragma region If_Modified_Since字段处理
-		if (RequestHeade.find("If-Modified-Since") != -1)
-			this->If_Modified_Since = HttpRequestHandler(RequestHeade, "If-Modified-Since:");
+		if (RequestHeader.find("If-Modified-Since") != -1)
+			this->If_Modified_Since = HttpRequestHandler(RequestHeader, "If-Modified-Since:");
 #pragma endregion
 #pragma region If_None_Match字段处理
-		if (RequestHeade.find("If-None-Match") != -1)
-			this->If_None_Match = HttpRequestHandler(RequestHeade, "If-None-Match:");
+		if (RequestHeader.find("If-None-Match") != -1)
+			this->If_None_Match = HttpRequestHandler(RequestHeader, "If-None-Match:");
 #pragma endregion
 #pragma region If_Range字段处理
-		if (RequestHeade.find("If-Range") != -1)
-			this->If_Range = HttpRequestHandler(RequestHeade, "If-Range:");
+		if (RequestHeader.find("If-Range") != -1)
+			this->If_Range = HttpRequestHandler(RequestHeader, "If-Range:");
 #pragma endregion
 #pragma region If_Unmodified_Since字段处理
-		if (RequestHeade.find("If-Unmodified-Since") != -1)
-			this->If_Unmodified_Since = HttpRequestHandler(RequestHeade, "If-Unmodified-Since:");
+		if (RequestHeader.find("If-Unmodified-Since") != -1)
+			this->If_Unmodified_Since = HttpRequestHandler(RequestHeader, "If-Unmodified-Since:");
 #pragma endregion
 #pragma region Origin字段处理
-		if (RequestHeade.find("Origin") != -1)
-			this->Origin = HttpRequestHandler(RequestHeade, "Origin:");
+		if (RequestHeader.find("Origin") != -1)
+			this->Origin = HttpRequestHandler(RequestHeader, "Origin:");
 #pragma endregion
 #pragma region Pragma字段处理
-		if (RequestHeade.find("Pragma") != -1)
-			this->Pragma = HttpRequestHandler(RequestHeade, "Pragma:");
+		if (RequestHeader.find("Pragma") != -1)
+			this->Pragma = HttpRequestHandler(RequestHeader, "Pragma:");
 #pragma endregion
 #pragma region Proxy_Authorization字段处理
-		if (RequestHeade.find("Proxy-Authorization") != -1)
-			this->Proxy_Authorization = HttpRequestHandler(RequestHeade, "Proxy-Authorization:");
+		if (RequestHeader.find("Proxy-Authorization") != -1)
+			this->Proxy_Authorization = HttpRequestHandler(RequestHeader, "Proxy-Authorization:");
 #pragma endregion
 #pragma region Range字段处理
-		if (RequestHeade.find("Range") != -1)
-			this->Range = HttpRequestHandler(RequestHeade, "Range:");
+		if (RequestHeader.find("Range") != -1)
+			this->Range = HttpRequestHandler(RequestHeader, "Range:");
 #pragma endregion
 #pragma region Referer字段处理
-		if (RequestHeade.find("Referer") != -1)
-			this->Referer = HttpRequestHandler(RequestHeade, "Referer:");
+		if (RequestHeader.find("Referer") != -1)
+			this->Referer = HttpRequestHandler(RequestHeader, "Referer:");
 #pragma endregion
 #pragma region TE字段处理
-		if (RequestHeade.find("TE") != -1)
-			this->TE = HttpRequestHandler(RequestHeade, "TE:");
+		if (RequestHeader.find("TE") != -1)
+			this->TE = HttpRequestHandler(RequestHeader, "TE:");
 #pragma endregion
 #pragma region User_Agent字段处理
-		if (RequestHeade.find("User-Agent") != -1)
-			this->User_Agent = HttpRequestHandler(RequestHeade, "User-Agent:");
+		if (RequestHeader.find("User-Agent") != -1)
+			this->User_Agent = HttpRequestHandler(RequestHeader, "User-Agent:");
 #pragma endregion
 #pragma region Upgrade字段处理
-		if (RequestHeade.find("Upgrade") != -1)
-			this->Upgrade = HttpRequestHandler(RequestHeade, "Upgrade:");
+		if (RequestHeader.find("Upgrade") != -1)
+			this->Upgrade = HttpRequestHandler(RequestHeader, "Upgrade:");
 #pragma endregion
 #pragma region Via字段处理
-		if (RequestHeade.find("Via") != -1)
-			this->Via = HttpRequestHandler(RequestHeade, "Via:");
+		if (RequestHeader.find("Via") != -1)
+			this->Via = HttpRequestHandler(RequestHeader, "Via:");
 #pragma endregion
 #pragma region Warning字段处理
-		if (RequestHeade.find("Warning") != -1)
-			this->Warning = HttpRequestHandler(RequestHeade, "Warning:");
+		if (RequestHeader.find("Warning") != -1)
+			this->Warning = HttpRequestHandler(RequestHeader, "Warning:");
 #pragma endregion
 #pragma endregion
 
