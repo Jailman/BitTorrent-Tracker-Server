@@ -43,7 +43,6 @@ namespace Utils::HttpServer
 		public:
 #pragma region 构造,析构函数
 			HttpRequest() = delete;
-			HttpRequest(SOCKET sClient);
 			HttpRequest(const char* HttpRequestBuffer,int64_t bufferLength);
 			~HttpRequest();
 #pragma endregion
@@ -112,7 +111,7 @@ namespace Utils::HttpServer
 				//请求的客户端没有上报此字段
 				None
 			};
-			ConnectionType Connection = ConnectionType::None;
+			ConnectionType Connection_Type = ConnectionType::None;
 			string Cookie = "";
 			int64_t Content_Length = 0;
 			string Content_MD5 = "";

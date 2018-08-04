@@ -237,7 +237,19 @@ namespace Utils::HttpServer
 		
 		}
 #pragma endregion
+#pragma region Cache_Control处理
+		if (RequestHeade.find("Connection-Type") != -1)
+		{
+			auto Cache_Control_Method = HttpRequestHandler(RequestHeade, "Connection-Type");
+			this->Connection_Type = ConnectionType::None;
+			if (Cache_Control_Method == "keep-alive")
+				this->Connection_Type = ConnectionType::KeepAlive;
+			else if (Cache_Control_Method == "close")
+				this->Connection_Type = ConnectionType::Close;
 
+
+		}
+#pragma endregion
 
 #pragma region 字符类字段处理
 
