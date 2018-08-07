@@ -11,12 +11,15 @@ namespace Utils::HttpServer
 		std::string value(HttpRequestBuffer.data() + indexStart, indexLength);
 		return value;
 	};
-	const std::exception SocketException("socket error");
-	const std::exception BadRequestException("bad request");
-	auto ServerListenThreadFunc = [](SOCKET& slisten, std::vector<SOCKET>& RequestList, std::mutex& ThreadAccessLocker)
+
+	const std::exception SocketException("Socket Error");
+	const std::exception BadRequestException("Bad Request");
+	const std::exception BadConnectionException("Bad Connection");
+
+	auto ServerListenThreadFunc = [](SOCKET& HostSocket, std::vector<SOCKET>& RequestList, std::mutex& ThreadAccessLocker,bool& ExitFlag)
 	{
 		constexpr int RecvTimeOut = 3000;
-		while (true)
+		while (ExitFlag)
 		{
 			try
 			{
@@ -25,7 +28,7 @@ namespace Utils::HttpServer
 				int nAddrlen = sizeof(remoteAddr);
 
 				//等待TCP连接
-				sClient = accept(slisten, (SOCKADDR *)&remoteAddr, &nAddrlen);
+				sClient = accept(HostSocket, (SOCKADDR *)&remoteAddr, &nAddrlen);
 
 				//unsigned long ul = 1;
 				//ioctlsocket(sClient, FIONBIO, (unsigned long *)&ul);
@@ -39,17 +42,14 @@ namespace Utils::HttpServer
 				ThreadAccessLocker.lock();
 				RequestList.push_back(sClient);
 				ThreadAccessLocker.unlock();
-				//std::thread(SocketConnectionHandler,sClient, buffer, TotalLenth); 这个会因为析构崩溃
+				//std::thread(SocketConnectionHandler,sClient, RequestBuffer, TotalLenth); 这个会因为析构崩溃
 			}
 			catch (std::exception e) {}
 		}
 	};
-	auto ServerThreadPoolFunc = [](HttpServer& host,std::vector<SOCKET>& RequestList, std::mutex& ThreadAccessLocker)
+	auto ServerThreadPoolFunc = [](HttpServer& Host,std::vector<SOCKET>& RequestList, std::mutex& ThreadAccessLocker, bool& ExitFlag)
 	{
-		constexpr int BufferLength = 256;
-		constexpr int RecvTimeOut = 3000;
-		using BufferArray = std::array<byte, BufferLength>;
-		while (true)
+		while (ExitFlag)
 		{
 			if (RequestList.size() < 8)Sleep(1);
 			if (RequestList.size() == 0)continue;
@@ -58,80 +58,8 @@ namespace Utils::HttpServer
 			auto sClient = RequestList[0];
 			RequestList.erase(RequestList.begin());
 			ThreadAccessLocker.unlock();
-
-			//接收数据 
-			std::vector<BufferArray> HttpRecBuffer;
-			BufferArray Tempbuffer = { 0 };
-			auto RecCount = 0;
-			auto TotalLenth = 0;
-			auto headLength = 0;
-			auto RetryCount = 0;
-			while (true)
-			{
-				auto SingleRecCount = recv(sClient, (char*)Tempbuffer._Elems + RecCount, BufferLength - RecCount, 0);
-				if (SingleRecCount == -1)
-				{
-					if (RetryCount == 10)
-					{
-						break;
-					}
-					RetryCount++;
-					Sleep(1);
-					continue;
-
-				};
-				RecCount += SingleRecCount;
-				if (strstr((char*)Tempbuffer._Elems, "\r\n\r\n"))
-				{
-					headLength = strstr((char*)Tempbuffer._Elems, "\r\n\r\n") - (char*)Tempbuffer._Elems + TotalLenth + 4;
-					HttpRecBuffer.push_back(Tempbuffer);
-					TotalLenth += RecCount;
-					break;
-				}
-				TotalLenth += RecCount;
-				if (TotalLenth%BufferLength == 0)
-				{
-					RecCount = 0;
-					HttpRecBuffer.push_back(Tempbuffer);
-					Tempbuffer = { 0 };
-				};
-			}
-			if (HttpRecBuffer.empty()) { closesocket(sClient); continue; };
-			byte* buffer = nullptr;
-			if (strstr((char*)HttpRecBuffer[0]._Elems, "POST") == (char*)HttpRecBuffer[0]._Elems)
-			{
-				//HTTP POST
-				char* HttpHeader = new char[headLength];
-				for (auto i = 0; i < headLength; i++)
-				{
-					HttpHeader[i] = HttpRecBuffer[i / BufferLength][i % BufferLength];
-				}
-				auto ContentLengthPos = strstr(HttpHeader, "Content-Length: ") + 16;
-				auto ContentLength = atoi(ContentLengthPos);
-				buffer = new byte[ContentLength];
-				for (auto i = 0; i < TotalLenth; i++)
-				{
-					buffer[i] = HttpRecBuffer[i / BufferLength][i % BufferLength];
-				}
-				while (TotalLenth != ContentLength)
-				{
-					RecCount = recv(sClient, (char*)buffer + TotalLenth, ContentLength - TotalLenth, 0);
-					TotalLenth += RecCount;
-				}
-			}
-			else
-			{
-				buffer = new byte[TotalLenth];
-				for (auto i = 0; i < TotalLenth; i++)
-				{
-					buffer[i] = HttpRecBuffer[i / BufferLength][i % BufferLength];
-				}
-			}
-			HttpSocketRequest req = { sClient,buffer,TotalLenth };
-
-			host.HttpSocketRequestRecevedEvent.Active(req);
-			delete[] req.buffer;
-			closesocket(req.sClient);
+			HttpServer::HttpRequest req(sClient);
+			Host.HttpSocketRequestRecevedEvent.Active(req);
 		}
 	};
 
@@ -148,7 +76,7 @@ namespace Utils::HttpServer
 
 		for (auto i = 0; i < threadPool.size(); i++)
 		{
-			threadPool[i] = std::thread(ServerThreadPoolFunc, std::ref(*this), std::ref(RequestList), std::ref(ThreadAccessLocker));
+			threadPool[i] = std::thread(ServerThreadPoolFunc, std::ref(*this), std::ref(RequestList), std::ref(ThreadAccessLocker), std::ref(this->ExitFlag));
 		}
 
 		//绑定端口
@@ -163,23 +91,106 @@ namespace Utils::HttpServer
 		if (listen(slisten, 5) == SOCKET_ERROR)
 			throw SocketException;
 
-		loopTh = std::thread(ServerListenThreadFunc, std::ref(slisten), std::ref(RequestList), std::ref(ThreadAccessLocker));
+		loopTh = std::thread(ServerListenThreadFunc, std::ref(slisten), std::ref(RequestList), std::ref(ThreadAccessLocker), std::ref(this->ExitFlag));
 	}
 	HttpServer::~HttpServer()
 	{
+		this->ExitFlag = false;
+		for (auto& thread : threadPool) 
+			if (thread.joinable())thread.join();
+		if (loopTh.joinable())loopTh.join();
+		std::vector<SOCKET>().swap(this->RequestList);
 		closesocket(slisten);
 		WSACleanup();
 	}
-	HttpServer::HttpRequest::HttpRequest(const char *HttpRequestBuffer, int64_t bufferLength)
+	HttpServer::HttpRequest::HttpRequest(SOCKET sClient)
 	{
-		const auto HttpHeadEndLength = strlen("\r\n\r\n");
-		auto reqHeaderEnd = strstr(HttpRequestBuffer, "\r\n\r\n") + HttpHeadEndLength;
-		if (reqHeaderEnd == 0)throw BadRequestException;
-		auto HeaderLength = reqHeaderEnd - HttpRequestBuffer;
-		std::string RequestHeader(HttpRequestBuffer, HeaderLength);
+#pragma region Socket参数获取
+		this->ClientSocket = sClient;
+		int SockAddrSize = sizeof(sockaddr_in);
+		getpeername(sClient, (sockaddr*)&(this->ClientAddr), &SockAddrSize);
+#pragma endregion
 
+#pragma region 接收数据
+		constexpr int BufferLength = 256;
+		constexpr int RecvTimeOut = 3000;
+		using BufferArray = std::array<byte, BufferLength>;
+		//接收数据 
+		std::vector<BufferArray> HttpRecBuffer;
+		BufferArray Tempbuffer = { 0 };
+		auto RecCount = 0;
+		auto TotalLenth = 0;
+		auto headLength = 0;
+		auto RetryCount = 0;
+		while (true)
+		{
+			auto SingleRecCount = recv(sClient, (char*)Tempbuffer._Elems + RecCount, BufferLength - RecCount, 0);
+			if (SingleRecCount == -1)
+			{
+				if (RetryCount == 10)
+				{
+					break;
+				}
+				RetryCount++;
+				Sleep(1);
+				continue;
+
+			};
+			RecCount += SingleRecCount;
+			if (strstr((char*)Tempbuffer._Elems, "\r\n\r\n"))
+			{
+				headLength = strstr((char*)Tempbuffer._Elems, "\r\n\r\n") - (char*)Tempbuffer._Elems + TotalLenth + 4;
+				HttpRecBuffer.push_back(Tempbuffer);
+				TotalLenth += RecCount;
+				break;
+			}
+			TotalLenth += RecCount;
+			if (TotalLenth%BufferLength == 0)
+			{
+				RecCount = 0;
+				HttpRecBuffer.push_back(Tempbuffer);
+				Tempbuffer = { 0 };
+			};
+		}
+		if (HttpRecBuffer.empty()) { closesocket(sClient); throw BadRequestException; };
+		if (strstr((char*)HttpRecBuffer[0]._Elems, "POST") == (char*)HttpRecBuffer[0]._Elems)
+		{
+			//HTTP POST
+			char* HttpHeader = new char[headLength];
+			for (auto i = 0; i < headLength; i++)
+			{
+				HttpHeader[i] = HttpRecBuffer[i / BufferLength][i % BufferLength];
+			}
+			auto ContentLengthPos = strstr(HttpHeader, "Content-Length: ") + 16;
+			auto ContentLength = atoi(ContentLengthPos);
+			RequestBuffer = new byte[ContentLength];
+			for (auto i = 0; i < TotalLenth; i++)
+			{
+				RequestBuffer[i] = HttpRecBuffer[i / BufferLength][i % BufferLength];
+			}
+			while (TotalLenth != ContentLength)
+			{
+				RecCount = recv(sClient, (char*)RequestBuffer + TotalLenth, ContentLength - TotalLenth, 0);
+				TotalLenth += RecCount;
+			}
+		}
+		else
+		{
+			RequestBuffer = new byte[TotalLenth];
+			for (auto i = 0; i < TotalLenth; i++)
+			{
+				RequestBuffer[i] = HttpRecBuffer[i / BufferLength][i % BufferLength];
+			}
+		}
+#pragma endregion
+#pragma region 处理请求
+		const auto HttpHeadEndLength = strlen("\r\n\r\n");
+		auto reqHeaderEnd = strstr((char*)(this->RequestBuffer), "\r\n\r\n") + HttpHeadEndLength;
+		if (reqHeaderEnd == 0)throw BadRequestException;
+		auto HeaderLength = reqHeaderEnd - (char*)RequestBuffer;
+		this->RequestHeader = std::string((char*)RequestBuffer, HeaderLength);
 #pragma region 判断请求类型
-		switch (HttpRequestBuffer[0])
+		switch (RequestBuffer[0])
 		{
 		case 'C':
 			this->Method = RequsetMethod::CONNECT;
@@ -197,7 +208,7 @@ namespace Utils::HttpServer
 			this->Method = RequsetMethod::OPTIONS;
 			break;
 		case 'P':
-			if (HttpRequestBuffer[1] == 'O')this->Method = RequsetMethod::POST;
+			if (RequestBuffer[1] == 'O')this->Method = RequsetMethod::POST;
 			else this->Method = RequsetMethod::PUT;
 			break;
 		case 'T':
@@ -212,31 +223,30 @@ namespace Utils::HttpServer
 		auto urlLength = RequestHeader.find(" ", urlStart) - urlStart;
 		this->RequsetUrl = std::string(RequestHeader.data() + urlStart, urlLength);
 #pragma endregion
-
 #pragma region Cache-Control处理
 		if (RequestHeader.find("Cache-Control") != -1)
 		{
-		auto Cache_Control_Method = HttpRequestHandler(RequestHeader, "Cache-Control:");
-		this->Cache_Control = CacheControl::NotSupport;
-		if (Cache_Control_Method.find("max-age=") != -1) 
-		{
-			this->Cache_Control = CacheControl::MaxAge;
-			const auto MaxAgeLength = strlen("max-age=");
-			this->Cache_Control_Max_Age = atoi(Cache_Control_Method.data() + MaxAgeLength);
-		}
-		else if (Cache_Control_Method == "public")
-			this->Cache_Control = CacheControl::Public;
-		else if (Cache_Control_Method == "no-cache")
-			this->Cache_Control = CacheControl::NoCache;
-		else if (Cache_Control_Method == "no-store")
-			this->Cache_Control = CacheControl::NoStore;
-		else if (Cache_Control_Method == "must-revalidation")
-			this->Cache_Control = CacheControl::MustRevalidation;
-		else if (Cache_Control_Method == "private")
-			this->Cache_Control = CacheControl::Private;
-		else if (Cache_Control_Method == "proxy-revalidation")
-			this->Cache_Control = CacheControl::ProxyRevalidation;
-		
+			auto Cache_Control_Method = HttpRequestHandler(RequestHeader, "Cache-Control:");
+			this->Cache_Control = CacheControl::NotSupport;
+			if (Cache_Control_Method.find("max-age=") != -1)
+			{
+				this->Cache_Control = CacheControl::MaxAge;
+				const auto MaxAgeLength = strlen("max-age=");
+				this->Cache_Control_Max_Age = atoi(Cache_Control_Method.data() + MaxAgeLength);
+			}
+			else if (Cache_Control_Method == "public")
+				this->Cache_Control = CacheControl::Public;
+			else if (Cache_Control_Method == "no-cache")
+				this->Cache_Control = CacheControl::NoCache;
+			else if (Cache_Control_Method == "no-store")
+				this->Cache_Control = CacheControl::NoStore;
+			else if (Cache_Control_Method == "must-revalidation")
+				this->Cache_Control = CacheControl::MustRevalidation;
+			else if (Cache_Control_Method == "private")
+				this->Cache_Control = CacheControl::Private;
+			else if (Cache_Control_Method == "proxy-revalidation")
+				this->Cache_Control = CacheControl::ProxyRevalidation;
+
 		}
 #pragma endregion
 #pragma region Connection-Type处理
@@ -250,7 +260,6 @@ namespace Utils::HttpServer
 				this->Connection_Type = ConnectionType::Close;
 		}
 #pragma endregion
-
 #pragma region 数值类字段处理
 #pragma region Content-Length处理
 		if (RequestHeader.find("Content-Length") != -1)
@@ -372,9 +381,86 @@ namespace Utils::HttpServer
 			this->Warning = HttpRequestHandler(RequestHeader, "Warning:");
 #pragma endregion
 #pragma endregion
-
+#pragma endregion
+	}
+	HttpServer::HttpRequest::HttpRequest(const HttpRequest & req)
+	{
+		this->Accept = req.Accept;
+		this->Accept_Charset = req.Accept_Charset;
+		this->Accept_Datetime = req.Accept_Datetime;
+		this->Accept_Encoding = req.Accept_Encoding;
+		this->Accept_Language = req.Accept_Language;
+		this->Authorization = req.Authorization;
+		this->Cache_Control = req.Cache_Control;
+		this->Cache_Control_Max_Age = req.Cache_Control_Max_Age;
+		this->Connection_Type = req.Connection_Type;
+		this->Content_Length = req.Content_Length;
+		this->Content_MD5 = req.Content_MD5;
+		this->Content_Type = req.Content_Type;
+		this->Cookie = req.Cookie;
+		this->Expect = req.Expect;
+		this->From = req.From;
+		this->Host = req.Host;
+		this->If_Match = req.If_Match;
+		this->If_Modified_Since = req.If_Modified_Since;
+		this->If_None_Match = req.If_None_Match;
+		this->If_Range = req.If_Range;
+		this->If_Unmodified_Since = req.If_Unmodified_Since;
+		this->Max_Forwards = req.Max_Forwards;
+		this->Method = req.Method;
+		this->Origin = req.Origin;
+		this->Pragma = req.Pragma;
+		this->Proxy_Authorization = req.Proxy_Authorization;
+		this->Range = req.Range;
+		this->Referer = req.Referer;
+		this->RequsetUrl = req.RequsetUrl;
+		this->TE = req.TE;
+		this->Upgrade = req.Upgrade;
+		this->User_Agent = req.User_Agent;
+		this->Via = req.Via;
+		this->Warning = req.Warning;
+	}
+	HttpServer::HttpRequest::HttpRequest(HttpRequest && rreq)
+	
+	{
+		this->Accept = std::move(rreq.Accept);
+		this->Accept_Charset = std::move(rreq.Accept_Charset);
+		this->Accept_Datetime = std::move(rreq.Accept_Datetime);
+		this->Accept_Encoding = std::move(rreq.Accept_Encoding);
+		this->Accept_Language = std::move(rreq.Accept_Language);
+		this->Authorization = std::move(rreq.Authorization);
+		this->Cache_Control = std::move(rreq.Cache_Control);
+		this->Cache_Control_Max_Age = std::move(rreq.Cache_Control_Max_Age);
+		this->Connection_Type = std::move(rreq.Connection_Type);
+		this->Content_Length = std::move(rreq.Content_Length);
+		this->Content_MD5 = std::move(rreq.Content_MD5);
+		this->Content_Type = std::move(rreq.Content_Type);
+		this->Cookie = std::move(rreq.Cookie);
+		this->Expect = std::move(rreq.Expect);
+		this->From = std::move(rreq.From);
+		this->Host = std::move(rreq.Host);
+		this->If_Match = std::move(rreq.If_Match);
+		this->If_Modified_Since = std::move(rreq.If_Modified_Since);
+		this->If_None_Match = std::move(rreq.If_None_Match);
+		this->If_Range = std::move(rreq.If_Range);
+		this->If_Unmodified_Since = std::move(rreq.If_Unmodified_Since);
+		this->Max_Forwards = std::move(rreq.Max_Forwards);
+		this->Method = std::move(rreq.Method);
+		this->Origin = std::move(rreq.Origin);
+		this->Pragma = std::move(rreq.Pragma);
+		this->Proxy_Authorization = std::move(rreq.Proxy_Authorization);
+		this->Range = std::move(rreq.Range);
+		this->Referer = std::move(rreq.Referer);
+		this->RequsetUrl = std::move(rreq.RequsetUrl);
+		this->TE = std::move(rreq.TE);
+		this->Upgrade = std::move(rreq.Upgrade);
+		this->User_Agent = std::move(rreq.User_Agent);
+		this->Via = std::move(rreq.Via);
+		this->Warning = std::move(rreq.Warning);
 	}
 	HttpServer::HttpRequest::~HttpRequest()
 	{
+		if (RequestBuffer != nullptr)delete[] RequestBuffer;
+		closesocket(ClientSocket);
 	}
 }

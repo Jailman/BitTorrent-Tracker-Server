@@ -10,20 +10,16 @@ namespace Utils::HttpServer
 	constexpr int ThreadPoolSize = 4;
 	class HttpServer
 	{
+	private:
+		bool ExitFlag = true;
 	public:
+		HttpServer() {};
 		HttpServer(int ListenPort);
+		HttpServer operator =(HttpServer&) = delete;
+		HttpServer operator= (HttpServer&&) = delete;
+		HttpServer(HttpServer&) = delete;
+		HttpServer(HttpServer&&) = delete;
 		~HttpServer();
-		struct HttpSocketRequest
-		{
-			SOCKET sClient;
-			byte* buffer;
-			int totalLength;
-		};
-		class HttpGetRequset 
-		{
-			HttpGetRequset(const HttpSocketRequest& req) {}
-		};
-		class HttpPostRequset {};
 	private:
 		const WORD sockVersion = MAKEWORD(2, 2);
 		WSADATA wsaData;
@@ -35,22 +31,19 @@ namespace Utils::HttpServer
 		std::vector<SOCKET> RequestList;
 		std::mutex ThreadAccessLocker;
 	public:
-		using EventHttpSocketRequestReceved = Event::Event<HttpSocketRequest>;
-		EventHttpSocketRequestReceved HttpSocketRequestRecevedEvent;
-	public:
 		class HttpRequest
 		{
 		public:
 #pragma region 构造,析构函数
-			HttpRequest() = delete;
-			HttpRequest(const char* HttpRequestBuffer,int64_t bufferLength);
+			HttpRequest() {};
+			HttpRequest(SOCKET sClient);
 			HttpRequest(const HttpRequest& req);
 			HttpRequest(HttpRequest&& rreq);
 			~HttpRequest();
 #pragma endregion
-#undef DELETE
 		public:
 #pragma region 请求上报的字段数据定义
+#undef DELETE
 			//请求类型
 			enum class RequsetMethod
 			{
@@ -72,7 +65,9 @@ namespace Utils::HttpServer
 				TRACE
 			};
 			//请求类型
+		private:
 			using string = std::string; //Magic ?
+		public:
 			RequsetMethod Method;
 			string RequsetUrl = "";
 			string Accept = "";
@@ -104,7 +99,7 @@ namespace Utils::HttpServer
 			};
 			CacheControl Cache_Control = CacheControl::None;
 			int64_t Cache_Control_Max_Age = -1;
-			enum class ConnectionType 
+			enum class ConnectionType
 			{
 				//长连接
 				KeepAlive,
@@ -118,27 +113,27 @@ namespace Utils::HttpServer
 			int64_t Content_Length = -1;
 			string Content_MD5 = "";
 			string Content_Type = "";
-			//shit，don't want to touch.
 			/*
-			struct HttpDateTime 
+			//shit，don't want to touch.
+			struct HttpDateTime
 			{
-				int Year;
-				int Month;
-				int Day;
-				int Hour;
-				int Minute;
-				int Second;
-				enum class week
-				{
-					Mon = 1,
-					Tues = 2,
-					Wed = 3,
-					Thur = 4,
-					Fri = 5,
-					Sat = 6,
-					Sun = 7
-				};
-				week WeekDat;
+			int Year;
+			int Month;
+			int Day;
+			int Hour;
+			int Minute;
+			int Second;
+			enum class week
+			{
+			Mon = 1,
+			Tues = 2,
+			Wed = 3,
+			Thur = 4,
+			Fri = 5,
+			Sat = 6,
+			Sun = 7
+			};
+			week WeekDat;
 			};
 			HttpDateTime Date = { 0 };
 			*/
@@ -162,9 +157,27 @@ namespace Utils::HttpServer
 			string Via = "";
 			string Warning = "";
 #pragma endregion
+#pragma region WinSock2类型
+		private:
+			SOCKET ClientSocket;
+		public:
+			sockaddr_in ClientAddr;
+#pragma endregion
+#pragma region 请求数据
+			std::string RequestHeader = "";
+			byte* RequestBuffer = nullptr;
+			uint64_t BufferLength = 0;
+#pragma endregion
+		public:
+			void SendBuffer(const void* bufferPtr, uint64_t size) 
+			{
+				send(ClientSocket, (char*)bufferPtr, size, 0);
+			}
 		};
+	public:
+		using EventHttpSocketRequestReceved = Event::Event<HttpRequest&>;
+		EventHttpSocketRequestReceved HttpSocketRequestRecevedEvent;
 	};
-	using HttpSocketRequest = HttpServer::HttpSocketRequest;
 
 }
 
