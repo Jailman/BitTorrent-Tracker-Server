@@ -10,22 +10,22 @@ namespace Utils::HttpServer
 	constexpr int ThreadPoolSize = 4;
 	class HttpServer
 	{
-	private:
+	protected:
 		bool ExitFlag = true;
 	public:
-		HttpServer() {};
+		HttpServer();
 		HttpServer(int ListenPort);
 		HttpServer operator =(HttpServer&) = delete;
 		HttpServer operator= (HttpServer&&) = delete;
 		HttpServer(HttpServer&) = delete;
 		HttpServer(HttpServer&&) = delete;
 		~HttpServer();
-	private:
+	protected:
 		const WORD sockVersion = MAKEWORD(2, 2);
 		WSADATA wsaData;
 		int ListenPort = 0;
 		SOCKET slisten;
-	private:
+	protected:
 		std::thread loopTh;
 		std::array<std::thread, ThreadPoolSize> threadPool;
 		std::vector<SOCKET> RequestList;
@@ -175,8 +175,9 @@ namespace Utils::HttpServer
 			}
 		};
 	public:
-		using EventHttpSocketRequestReceved = Event::Event<HttpRequest&>;
-		EventHttpSocketRequestReceved HttpSocketRequestRecevedEvent;
+		Event::Event<HttpRequest&> HttpSocketRequestRecevedEvent;
+	protected:
+		Event::Event<SOCKET&> ConnectionCreatedEvent;
 	};
 
 }

@@ -39,6 +39,10 @@ namespace Event
 				std::vector<Processer>().swap(this->Processors);
 			this->Processors = std::move(REvent.Processors);
         }
+		void Swap(Event& rEvent)
+		{
+			rEvent.Processors.swap(this->Processors);
+		}
 	};
 
 }

@@ -4,7 +4,7 @@
 #include <vector>
 namespace BTTServer 
 {
-	class BTTServer : private Utils::HttpServer::HttpServer
+	class BTTServer final : protected Utils::HttpServer::HttpServer
 	{
 	public:
 		BTTServer(int ListenPort);
@@ -26,16 +26,18 @@ namespace BTTServer
 			bool operator!=(const Hash& h);
 			Hash operator= (const Hash& h);
 			Hash operator= (const Hash&&) = delete;
+			Hash operator= (std::string hashString);
+			Hash operator= (const char* hashString);
+			Hash operator= (const void* hashptr);
 		public:
 			Hash(const Hash& h);
 			Hash(const Hash&&) = delete;
 			
 		};
-		class HttpBTRequest : private Utils::HttpServer::HttpServer::HttpRequest
+		class HttpBTRequest final : protected Utils::HttpServer::HttpServer::HttpRequest
 		{
 		public:
 			HttpBTRequest(SOCKET ClientSocket);
-			HttpBTRequest(Utils::HttpServer::HttpServer::HttpRequest Request);
 		public:
 			Hash peer_info_hash;
 			char peer_peer_id[21] = { 0 };

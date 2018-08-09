@@ -47,7 +47,7 @@ namespace Utils::HttpServer
 			catch (std::exception e) {}
 		}
 	};
-	auto ServerThreadPoolFunc = [](HttpServer& Host,std::vector<SOCKET>& RequestList, std::mutex& ThreadAccessLocker, bool& ExitFlag)
+	auto ServerThreadPoolFunc = [](Event::Event<SOCKET&>& ConnectionCreatedEvent,std::vector<SOCKET>& RequestList, std::mutex& ThreadAccessLocker, bool& ExitFlag)
 	{
 		while (ExitFlag)
 		{
@@ -58,12 +58,28 @@ namespace Utils::HttpServer
 			auto sClient = RequestList[0];
 			RequestList.erase(RequestList.begin());
 			ThreadAccessLocker.unlock();
-			HttpServer::HttpRequest req(sClient);
-			Host.HttpSocketRequestRecevedEvent.Active(req);
+			try 
+			{
+				ConnectionCreatedEvent.Active(sClient);
+			}
+			catch (std::exception e) 
+			{
+				;
+			}
+			closesocket(sClient);
 		}
 	};
 
-	HttpServer::HttpServer(int ListenPort)
+	HttpServer::HttpServer() 
+	{
+		this->ConnectionCreatedEvent += [this](SOCKET& ClientSocket) 
+		{
+			auto req = HttpRequest(ClientSocket);
+			this->HttpSocketRequestRecevedEvent.Active(req);
+		};
+	}
+
+	HttpServer::HttpServer(int ListenPort):HttpServer()
 	{
 		auto hr = 0;
 		//初始化
@@ -76,7 +92,7 @@ namespace Utils::HttpServer
 
 		for (auto i = 0; i < threadPool.size(); i++)
 		{
-			threadPool[i] = std::thread(ServerThreadPoolFunc, std::ref(*this), std::ref(RequestList), std::ref(ThreadAccessLocker), std::ref(this->ExitFlag));
+			threadPool[i] = std::thread(ServerThreadPoolFunc, std::ref(this->ConnectionCreatedEvent), std::ref(RequestList), std::ref(ThreadAccessLocker), std::ref(this->ExitFlag));
 		}
 
 		//绑定端口
